@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>维护窗口排程</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🛠 维护窗口排程 <span class="brand-sub">Maintenance Window Scheduler</span></div>
+    <div class="topbar-actions">
+      <select id="scenarioSelect" title="已保存场景">
+        <option value="">— 选择已保存场景 —</option>
+      </select>
+      <input id="scenarioName" type="text" placeholder="场景名称" maxlength="200" />
+      <button id="btnSave" class="btn">💾 保存场景</button>
+      <button id="btnLoad" class="btn">↺ 恢复</button>
+      <button id="btnDelete" class="btn btn-danger" title="删除当前场景">🗑</button>
+      <button id="btnExport" class="btn btn-primary">⬇ 导出 JSON</button>
+      <button id="btnSample" class="btn">示例</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- 左：编辑器 -->
+    <section class="panel panel-left">
+      <div class="panel-section">
+        <h3>维护窗口</h3>
+        <div class="form-row">
+          <label>开始 <input type="datetime-local" id="winStart" step="300" /></label>
+          <label>结束 <input type="datetime-local" id="winEnd" step="300" /></label>
+        </div>
+        <div class="form-row">
+          <label class="chk"><input type="checkbox" id="autoRecompute" checked /> 拖动后即时重算</label>
+          <button id="btnRecompute" class="btn btn-small btn-primary">▶ 立即排程</button>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h3>资源容量</h3>
+        <table class="mini-table" id="resourceTable">
+          <thead><tr><th>资源</th><th>容量</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <button id="btnAddResource" class="btn btn-small">＋ 资源</button>
+      </div>
+
+      <div class="panel-section">
+        <h3>维护任务 <span class="hint" id="nodeCount"></span></h3>
+        <table class="mini-table" id="nodeTable">
+          <thead>
+            <tr>
+              <th>名称</th><th>时长(分)</th><th>资源占用</th><th>固定开始</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <button id="btnAddNode" class="btn btn-small">＋ 任务</button>
+      </div>
+
+      <div class="panel-section">
+        <h3>依赖关系（source 完成后 target 才能开始）</h3>
+        <table class="mini-table" id="edgeTable">
+          <thead><tr><th>前置</th><th></th><th>后继</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <button id="btnAddEdge" class="btn btn-small">＋ 依赖</button>
+      </div>
+
+      <div class="panel-section">
+        <h3>不可维护时间段（禁排期）</h3>
+        <table class="mini-table" id="blackoutTable">
+          <thead><tr><th>名称</th><th>开始</th><th>结束</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <button id="btnAddBlackout" class="btn btn-small">＋ 禁排期</button>
+      </div>
+    </section>
+
+    <!-- 右：结果 -->
+    <section class="panel panel-right">
+      <div class="status-bar" id="statusBar">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">等待排程…</span>
+        <span class="status-stats" id="statusStats"></span>
+      </div>
+
+      <div id="conflictBox" class="conflict-box hidden"></div>
+
+      <div class="gantt-wrap">
+        <canvas id="gantt"></canvas>
+      </div>
+
+      <div class="legend" id="legend"></div>
+
+      <div class="schedule-table-wrap">
+        <h3>执行顺序</h3>
+        <table class="mini-table" id="scheduleTable">
+          <thead>
+            <tr><th>#</th><th>任务</th><th>开始</th><th>结束</th><th>时长</th><th>前置</th><th>资源</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
