@@ -4,6 +4,10 @@
 计算满足依赖与资源容量约束的**可执行顺序和开始/结束时间**，检测**循环依赖**与**资源重叠**，
 给出**可定位的冲突链**；甘特图上可拖动调整窗口并即时重算，支持场景保存/恢复与 JSON 导出。
 
+另提供**场景模板**：可把窗口、资源、任务及依赖保存为**含变量的模板**（基准日期、任务时长、
+前置任务结束时间偏移），输入参数后**预览并实例化为独立场景**，系统解析变量依赖、校验循环引用
+与时间越界后再交给排程器计算；模板、实例与解析后的参数均可写入 JSON 导出。
+
 - 后端：FastAPI + SQLite（标准库 `sqlite3`，零额外 ORM 依赖）
 - 前端：原生 HTML / CSS / JavaScript（Canvas 绘制甘特图，无任何前端构建步骤）
 - 部署：单镜像 Docker / docker compose 一键启动
@@ -127,21 +131,80 @@ APP_PORT=9000 docker compose up -d --build   # 访问 http://localhost:9000
 
 ### 5. JSON 导出
 
-「⬇ 导出 JSON」会下载 `maintenance-schedule-<时间戳>.json`，内容同时包含：
+「⬇ 导出 JSON」会下载 `maintenance-schedule-<时间戳>.json`（模板实例则为
+`maintenance-template-instance-<时间戳>.json`），内容同时包含：
 
 ```json
 {
   "exported_at": "导出时间(UTC)",
   "scenario": { "…当前编辑场景的完整输入…" },
   "result":   { "feasible": true, "items": [ …排程明细… ], "order": [],
-                "unscheduled": [], "conflicts": [], "stats": {}, "window": {} }
+                "unscheduled": [], "conflicts": [], "stats": {}, "window": {} },
+  "kind": "template_instance",
+  "template": { "…模板定义（仅模板实例）…" },
+  "params":   { "…实例化时输入的参数（仅模板实例）…" },
+  "resolved": { "…解析后的参数、固定时间、锚点时间（仅模板实例）…" }
 }
 ```
+
+### 6. 场景模板（含变量）
+
+点击顶栏「**🧩 场景模板**」打开模板工作台，左右两栏：左边定义模板，右边输入参数 → 预览 → 实例化。
+
+**模板变量（三种类型）**：
+
+| 类型 | 含义 | 取值 |
+| --- | --- | --- |
+| `date` | **基准日期**，窗口 / 固定开始 / 禁排期围绕它做日期偏移 | 日期或 `datetime-local` |
+| `duration` | **任务时长**（分钟），用于任务时长字段 | 非负整数分钟 |
+| `offset` | **前置任务结束时间偏移**（分钟），用于固定开始表达式 | 非负整数分钟 |
+
+变量可设置默认值；无默认值的变量在实例化时必填。
+
+**表达式语法**（字段整体写在 `{{ ... }}` 中）：
+
+| 表达式 | 含义 |
+| --- | --- |
+| `{{base_date @ 22:00}}` | 基准日期当晚 22:00 |
+| `{{base_date + 1d @ 06:00}}` | 基准日期次日 06:00（`1d`=天、`2h`=小时、`30m`=分钟） |
+| `{{base_date + 2h + 30m}}` | 基准日期 00:00 起偏移 2 小时 30 分 |
+| `{{end(a) + 30m}}` | 任务 `a` **结束**后 30 分钟开始（前置结束时间偏移） |
+| `{{start(b) - 15m}}` | 任务 `b` **开始**前 15 分钟 |
+| `{{upgrade_dur}}` | 时长 / 偏移变量直接作为分钟数（可写 `{{d / 2 + 10m}}`，支持 `+ - * /`） |
+
+> 说明：`end(x)` / `start(x)` 锚点要求任务 `x` 本身具有**可解析的固定开始时间**；
+> 弹性任务的时间由排程器在运行期计算，不能作为模板锚点（会报 `anchor_unresolved`）。
+
+**从现有场景生成模板**：在主编辑器中维护好窗口/任务/禁排期后，模板工作台里点击
+「**⤓ 从当前编辑器场景生成**」，系统自动建立 `base_date` 基准日期变量，并把窗口、固定开始时间、
+禁排期全部转换为 `{{base_date …}}` 表达式；随后可把任务的固定开始手工改写为
+`{{end(前置任务) + 偏移}}` 形式。
+
+**预览与实例化**：
+
+1. 在右栏「① 输入实例化参数」填入参数（留空使用默认值）；
+2. 「**👁 预览解析并排程**」：显示解析后的窗口、变量值、每个固定任务的绝对时间、
+   `end()/start()` 锚点时间表，以及迷你甘特图与排程可行性；
+3. 存在**错误**（表达式语法、未定义变量、**变量循环引用**、必填参数缺失、锚点不可解析、
+   窗口非法）时不生成实例；**时间越界**（固定任务越窗、禁排期落在窗外）以黄色警告展示，
+   仍可预览排程（排程器会进一步给出 `fixed_window` 等冲突）；
+4. 「**🚀 实例化并保存**」：解析结果作为**独立场景**存入 `scenarios` 表并载入主编辑器，
+   之后可自由拖动 / 修改，且后续编辑模板**不影响**已生成的实例（重名自动追加序号）。
+
+**模板的保存与导出**：模板本身保存在 SQLite `templates` 表（CRUD 与场景一致）；
+「**⬇ 导出模板 JSON**」下载 `maintenance-template-<时间戳>.json`，包含
+`template`（模板定义）、`params`（输入参数）、`resolved`（解析后的全部参数 / 窗口 /
+时长 / 固定时间 / 锚点时间 / 禁排期）、`issues`（校验问题）、`scenario`（实例场景）
+与 `result`（排程结果）。
 
 ---
 
 ## 四、排程算法说明
 
+0. **模板解析（仅模板实例化时，见 `templating.py`）**：词法/语法分析表达式 → 参数装配
+   （缺省值回填）→ 变量与锚点引用检查 → **Tarjan 检测 `end()/start()` 锚点循环引用** →
+   先解析全部任务时长，再按锚点依赖波次推进解析窗口、固定开始时间、禁排期 →
+   **时间越界校验**（固定任务越窗 / 禁排期在窗外，作为 warning）→ 输出与普通场景同构的具体场景。
 1. **输入规整与校验**：时间格式、时长、资源用量、id 唯一性、区间合法性。
 2. **环检测**：Tarjan 强连通分量找出所有循环依赖（含自环），还原可读环路径；
    环上任务标记不可排程，环外任务照常求解。
@@ -164,12 +227,20 @@ APP_PORT=9000 docker compose up -d --build   # 访问 http://localhost:9000
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | POST | `/api/schedule` | 提交场景 JSON，返回排程结果与冲突链 |
-| POST | `/api/export` | 同 schedule，结果以 JSON 文件下载 |
+| POST | `/api/export` | 同 schedule，结果以 JSON 文件下载（可携带 `__template__/__params__/__resolved__/__issues__` 导出模板实例） |
 | GET | `/api/scenarios` | 场景列表（id/名称/时间戳） |
 | POST | `/api/scenarios` | 新建或按同名更新场景 `{name, data}` |
 | GET | `/api/scenarios/{id}` | 恢复某场景（含完整 data） |
 | PUT | `/api/scenarios/{id}` | 更新场景 |
 | DELETE | `/api/scenarios/{id}` | 删除场景 |
+| GET | `/api/templates` | 模板列表 |
+| POST | `/api/templates` | 新建 / 同名更新模板 `{name, data}`（保存前做结构校验） |
+| GET | `/api/templates/{id}` | 获取模板（含完整 data） |
+| PUT | `/api/templates/{id}` | 更新模板 |
+| DELETE | `/api/templates/{id}` | 删除模板 |
+| POST | `/api/templates/preview` | `{data, params}` 解析变量并排程（不落库）；error 以 422 返回 `issues` |
+| POST | `/api/templates/instantiate` | 解析 → 排程 → 保存为独立场景，返回编辑器 state 与排程结果 |
+| POST | `/api/templates/export` | 模板 / 参数 / 解析值 / 实例场景 / 排程结果合并导出为 JSON 文件 |
 | GET | `/api/health` | 健康检查 |
 
 排程请求体示例：
@@ -192,6 +263,43 @@ APP_PORT=9000 docker compose up -d --build   # 访问 http://localhost:9000
 }
 ```
 
+模板请求体示例（`POST /api/templates/preview`）：
+
+```json
+{
+  "data": {
+    "name": "夜间数据库升级模板",
+    "variables": [
+      { "name": "base_date", "type": "date", "default": "2026-09-23" },
+      { "name": "upgrade_dur", "type": "duration", "default": 90 },
+      { "name": "guard", "type": "offset", "default": 15 }
+    ],
+    "scenario": {
+      "window_start": "{{base_date @ 22:00}}",
+      "window_end":   "{{base_date + 1d @ 06:00}}",
+      "resources": { "DBA": 1 },
+      "nodes": [
+        { "id": "a", "name": "主备切换", "duration_minutes": 30,
+          "resources": { "DBA": 1 }, "fixed_start": "{{base_date @ 22:00}}" },
+        { "id": "b", "name": "版本升级", "duration_minutes": "{{upgrade_dur}}",
+          "resources": { "DBA": 1 }, "fixed_start": "{{end(a) + guard}}" },
+        { "id": "c", "name": "流量切回", "duration_minutes": 20,
+          "resources": { "DBA": 1 }, "fixed_start": "{{end(b) + 30m}}" }
+      ],
+      "edges": [ { "source": "a", "target": "b" }, { "source": "b", "target": "c" } ],
+      "blackouts": [
+        { "name": "计费批处理",
+          "start": "{{base_date + 1d @ 00:00}}", "end": "{{base_date + 1d @ 00:30}}" }
+      ]
+    }
+  },
+  "params": { "base_date": "2026-10-01", "upgrade_dur": 60, "guard": 20 }
+}
+```
+
+实例化（`POST /api/templates/instantiate`）在上述基础上增加 `"template_id"`（可选，
+不传则使用内联 `data`）与 `"name"`（实例场景名称），返回 `{id, name, data, result, resolved, issues}`。
+
 ---
 
 ## 六、目录结构与测试
@@ -199,14 +307,17 @@ APP_PORT=9000 docker compose up -d --build   # 访问 http://localhost:9000
 ```
 .
 ├── app/
-│   ├── main.py            # FastAPI：API、SQLite、静态托管、导出
+│   ├── main.py            # FastAPI：API、SQLite（scenarios/templates）、静态托管、导出
 │   ├── scheduler.py       # DAG 环检测 / 拓扑排序 / 资源+禁排期排程
+│   ├── templating.py      # 场景模板：表达式词法/语法、变量解析、锚点环检测、时间越界校验
 │   ├── models.py          # Pydantic 模型
 │   └── static/
-│       ├── index.html     # 编辑器 + 结果区布局
+│       ├── index.html     # 编辑器 + 结果区 + 模板工作台弹窗
 │       ├── app.js         # 原生 JS：表格编辑、Canvas 甘特图、拖拽、场景、导出
+│       ├── templates.js   # 模板工作台：变量编辑、参数预览、迷你甘特、实例化
 │       └── styles.css
 ├── test_scheduler.py      # 排程核心测试（53 项断言，无需第三方库）
+├── test_templating.py     # 模板引擎测试（47 项断言，无需第三方库）
 ├── requirements.txt
 ├── Dockerfile
 └── docker-compose.yml
@@ -217,6 +328,7 @@ APP_PORT=9000 docker compose up -d --build   # 访问 http://localhost:9000
 ```bash
 pip install -r requirements.txt   # 测试仅依赖 fastapi（含 pydantic）
 python test_scheduler.py
+python test_templating.py
 ```
 
 ---

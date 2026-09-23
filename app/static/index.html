@@ -18,6 +18,7 @@
       <button id="btnLoad" class="btn">↺ 恢复</button>
       <button id="btnDelete" class="btn btn-danger" title="删除当前场景">🗑</button>
       <button id="btnExport" class="btn btn-primary">⬇ 导出 JSON</button>
+      <button id="btnTemplates" class="btn">🧩 场景模板</button>
       <button id="btnSample" class="btn">示例</button>
     </div>
   </header>
@@ -107,6 +108,136 @@
   </main>
 
   <div id="toast" class="toast hidden"></div>
+
+  <!-- 场景模板工作台 -->
+  <div id="tplModal" class="modal-mask hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <b>🧩 场景模板工作台</b>
+        <div class="modal-head-actions">
+          <select id="tplSelect" title="已保存模板">
+            <option value="">— 选择已保存模板 —</option>
+          </select>
+          <button id="tplBtnNew" class="btn btn-small">＋ 新建</button>
+          <button id="tplBtnSave" class="btn btn-small btn-primary">💾 保存模板</button>
+          <button id="tplBtnDelete" class="btn btn-small btn-danger">🗑 删除</button>
+          <button id="tplBtnClose" class="btn btn-small">✕ 关闭</button>
+        </div>
+      </div>
+
+      <div class="modal-body">
+        <!-- 左：模板定义 -->
+        <div class="tpl-col tpl-col-left">
+          <div class="tpl-section">
+            <h3>模板名称</h3>
+            <input id="tplName" type="text" placeholder="如：夜间数据库升级模板" maxlength="200" />
+            <button id="tplBtnFromEditor" class="btn btn-small" style="margin-top:6px"
+              title="把主编辑器中的窗口/资源/任务/依赖/禁排期转成模板，并自动建立基准日期变量">
+              ⤓ 从当前编辑器场景生成（自动建立基准日期变量）
+            </button>
+          </div>
+
+          <div class="tpl-section">
+            <h3>变量参数 <span class="hint">date=基准日期 · duration=任务时长 · offset=前置结束偏移(分钟)</span></h3>
+            <table class="mini-table" id="tplVarTable">
+              <thead><tr><th>变量名</th><th>类型</th><th>显示名</th><th>默认值</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <button id="tplBtnAddVar" class="btn btn-small">＋ 变量</button>
+          </div>
+
+          <div class="tpl-section">
+            <h3>维护窗口 <span class="hint">可写表达式，如 {{base_date @ 22:00}}</span></h3>
+            <div class="form-row">
+              <label>开始 <input id="tplWinStart" class="tpl-expr" placeholder="{{base_date @ 22:00}}" /></label>
+              <label>结束 <input id="tplWinEnd" class="tpl-expr" placeholder="{{base_date + 1d @ 06:00}}" /></label>
+            </div>
+          </div>
+
+          <div class="tpl-section">
+            <h3>资源容量</h3>
+            <table class="mini-table" id="tplResourceTable">
+              <thead><tr><th>资源</th><th>容量</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <button id="tplBtnAddResource" class="btn btn-small">＋ 资源</button>
+          </div>
+
+          <div class="tpl-section">
+            <h3>维护任务 <span class="hint">时长可写 {{时长变量}}；固定开始可写 {{end(前置)+偏移}}</span></h3>
+            <table class="mini-table" id="tplNodeTable">
+              <thead>
+                <tr><th>ID</th><th>名称</th><th>时长(分/表达式)</th><th>固定开始（可写表达式）</th><th></th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <button id="tplBtnAddNode" class="btn btn-small">＋ 任务</button>
+          </div>
+
+          <div class="tpl-section">
+            <h3>依赖关系</h3>
+            <table class="mini-table" id="tplEdgeTable">
+              <thead><tr><th>前置</th><th></th><th>后继</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <button id="tplBtnAddEdge" class="btn btn-small">＋ 依赖</button>
+          </div>
+
+          <div class="tpl-section">
+            <h3>禁排期 <span class="hint">时间支持基准日期表达式</span></h3>
+            <table class="mini-table" id="tplBlackoutTable">
+              <thead><tr><th>名称</th><th>开始</th><th>结束</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <button id="tplBtnAddBlackout" class="btn btn-small">＋ 禁排期</button>
+          </div>
+        </div>
+
+        <!-- 右：参数 → 预览 -->
+        <div class="tpl-col tpl-col-right">
+          <div class="tpl-section">
+            <h3>① 输入实例化参数</h3>
+            <div id="tplParamForm" class="tpl-param-form">
+              <span class="hint">保存模板变量后，这里会出现参数输入框</span>
+            </div>
+          </div>
+
+          <div class="tpl-section">
+            <h3>② 预览解析结果</h3>
+            <div class="tpl-preview-actions">
+              <button id="tplBtnPreview" class="btn btn-small btn-primary">👁 预览解析并排程</button>
+              <button id="tplBtnExportTpl" class="btn btn-small">⬇ 导出模板 JSON</button>
+            </div>
+            <div id="tplIssueBox" class="tpl-issue-box hidden"></div>
+            <div id="tplResolvedBox" class="tpl-resolved-box hidden"></div>
+            <div id="tplGanttWrap" class="tpl-gantt hidden">
+              <div class="tpl-gantt-axis" id="tplGanttAxis"></div>
+              <div id="tplGanttRows"></div>
+            </div>
+          </div>
+
+          <div class="tpl-section">
+            <h3>③ 实例化为独立场景</h3>
+            <div class="form-row">
+              <input id="tplInstanceName" type="text" placeholder="实例名称（保存为主编辑器中的独立场景）" maxlength="200" />
+              <button id="tplBtnInstantiate" class="btn btn-small btn-primary">🚀 实例化并保存</button>
+            </div>
+            <p class="hint">实例化后该场景独立于模板：后续修改模板不影响已生成的场景。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-foot hint" id="tplFoot">
+        表达式语法：<code>{{base_date @ 22:00}}</code> 基准日期当晚 22:00；
+        <code>{{base_date + 1d @ 06:00}}</code> 次日 06:00；
+        <code>{{end(a) + 30m}}</code> 任务 a 结束后 30 分钟；
+        <code>{{start(b) - 15m}}</code> 任务 b 开始前 15 分钟；
+        支持 <code>+ - * /</code> 与 <code>30m / 2h / 1d</code>。
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/templates.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

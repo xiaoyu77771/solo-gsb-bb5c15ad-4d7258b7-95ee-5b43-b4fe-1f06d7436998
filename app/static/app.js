@@ -12,6 +12,7 @@ const state = {
   edges: [],                // [{source, target}]
   blackouts: [],            // [{id, name, start, end}]
   uid: 1,
+  templateRef: null,        // 由模板实例化时：{id, name, params, resolved, issues}
 };
 let lastResult = null;
 let recomputeTimer = null;
@@ -259,7 +260,7 @@ $("#btnRecompute").onclick = () => recompute(true);
 // ---------------------------------------------------------------------------
 // 请求载荷 / 排程
 // ---------------------------------------------------------------------------
-function buildPayload() {
+function buildPayload(extra = {}) {
   return {
     window_start: state.windowStart,
     window_end: state.windowEnd,
@@ -272,6 +273,7 @@ function buildPayload() {
                       .map((e) => ({ source: e.source, target: e.target })),
     blackouts: state.blackouts.filter((b) => b.start && b.end)
                               .map((b) => ({ name: b.name, start: b.start, end: b.end })),
+    ...extra,
   };
 }
 
@@ -787,6 +789,7 @@ function serializeState() {
     windowStart: state.windowStart, windowEnd: state.windowEnd,
     resources: state.resources, nodes: state.nodes, edges: state.edges,
     blackouts: state.blackouts, uid: state.uid,
+    templateRef: state.templateRef,
   };
 }
 function deserializeState(d) {
@@ -799,6 +802,7 @@ function deserializeState(d) {
   state.edges = d.edges || [];
   state.blackouts = d.blackouts || [];
   state.uid = d.uid || (state.nodes.length + state.blackouts.length + 1);
+  state.templateRef = d.templateRef || null;
   $("#winStart").value = state.windowStart;
   $("#winEnd").value = state.windowEnd;
   renderAll();
@@ -851,9 +855,19 @@ $("#btnDelete").onclick = async () => {
 // ---------------------------------------------------------------------------
 $("#btnExport").onclick = async () => {
   if (!state.windowStart || !state.windowEnd) return toast("请先设置维护窗口", true);
+  // 模板实例化场景：导出时附带模板定义 / 输入参数 / 解析值
+  const extra = {};
+  if (state.templateRef) {
+    Object.assign(extra, {
+      __template__: state.templateRef.template || null,
+      __params__: state.templateRef.params || null,
+      __resolved__: state.templateRef.resolved || null,
+      __issues__: state.templateRef.issues || [],
+    });
+  }
   const resp = await fetch("/api/export", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(buildPayload()),
+    body: JSON.stringify(buildPayload(extra)),
   });
   if (!resp.ok) {
     const e = await resp.json().catch(() => ({}));
@@ -922,6 +936,33 @@ $("#btnSample").onclick = () => {
 // ---------------------------------------------------------------------------
 // 启动
 // ---------------------------------------------------------------------------
+
+// 供 templates.js 调用的公共接口
+window.SchedulerApp = {
+  toast,
+  getState: () => ({
+    windowStart: state.windowStart,
+    windowEnd: state.windowEnd,
+    resources: state.resources.map((r) => ({ ...r })),
+    nodes: state.nodes.map((n) => ({ ...n, resources: { ...n.resources } })),
+    edges: state.edges.map((e) => ({ ...e })),
+    blackouts: state.blackouts.map((b) => ({ ...b })),
+    uid: state.uid,
+  }),
+  // 模板实例化后载入为当前编辑场景
+  loadInstance(data, name, id) {
+    deserializeState(data);
+    state.templateRef = data.templateRef || null;
+    lastResult = null;
+    recompute(false);
+    $("#scenarioName").value = name;
+    $("#scenarioSelect").value = id;
+  },
+  async refreshScenarioList() {
+    await loadScenarioList();
+  },
+};
+
 (function init() {
   const day = new Date();
   day.setHours(0, 0, 0, 0);
