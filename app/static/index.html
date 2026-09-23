@@ -17,6 +17,7 @@
       <button id="btnSave" class="btn">💾 保存场景</button>
       <button id="btnLoad" class="btn">↺ 恢复</button>
       <button id="btnDelete" class="btn btn-danger" title="删除当前场景">🗑</button>
+      <button id="btnTemplates" class="btn">📋 场景模板</button>
       <button id="btnExport" class="btn btn-primary">⬇ 导出 JSON</button>
       <button id="btnSample" class="btn">示例</button>
     </div>
@@ -83,6 +84,7 @@
       <div class="status-bar" id="statusBar">
         <span class="status-dot" id="statusDot"></span>
         <span id="statusText">等待排程…</span>
+        <span id="tplContextBadge" class="tpl-badge hidden"></span>
         <span class="status-stats" id="statusStats"></span>
       </div>
 
@@ -107,6 +109,19 @@
   </main>
 
   <div id="toast" class="toast hidden"></div>
+
+  <!-- 场景模板模态框 -->
+  <div id="tplModal" class="modal-mask hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <span id="tplModalTitle">📋 场景模板</span>
+        <button id="btnTplClose" class="btn btn-small" title="关闭">✕</button>
+      </div>
+      <div class="modal-body" id="tplModalBody"></div>
+    </div>
+  </div>
+
   <script src="/static/app.js"></script>
+  <script src="/static/templates.js"></script>
 </body>
 </html>

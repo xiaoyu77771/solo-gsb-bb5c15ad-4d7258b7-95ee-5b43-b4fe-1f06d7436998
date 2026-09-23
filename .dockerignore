@@ -8,4 +8,6 @@ venv/
 data/
 *.db
 test_scheduler.py
+test_templating.py
+test_api.py
 README.md

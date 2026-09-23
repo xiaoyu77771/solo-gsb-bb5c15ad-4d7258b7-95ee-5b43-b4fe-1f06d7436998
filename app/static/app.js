@@ -12,6 +12,7 @@ const state = {
   edges: [],                // [{source, target}]
   blackouts: [],            // [{id, name, start, end}]
   uid: 1,
+  templateContext: null,    // 由模板实例化时写入：{template, instance_name, resolved}
 };
 let lastResult = null;
 let recomputeTimer = null;
@@ -56,6 +57,28 @@ function toast(msg, isErr = false) {
   t.className = "toast" + (isErr ? " err" : "");
   clearTimeout(toast._t);
   toast._t = setTimeout(() => t.classList.add("hidden"), 2600);
+}
+
+function clearTemplateContext() {
+  if (state.templateContext) {
+    state.templateContext = null;
+    updateTplBadge();
+  }
+}
+
+function updateTplBadge() {
+  const badge = $("#tplContextBadge");
+  if (!badge) return;
+  const ctx = state.templateContext;
+  if (ctx && ctx.template && ctx.template.name) {
+    badge.classList.remove("hidden");
+    badge.textContent = `📋 模板实例：${ctx.template.name}` +
+      (ctx.instance_name && ctx.instance_name !== ctx.template.name ? ` · ${ctx.instance_name}` : "");
+    badge.title = "当前场景由场景模板实例化（变量已解析）";
+  } else {
+    badge.classList.add("hidden");
+    badge.textContent = "";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -220,7 +243,15 @@ function onEditorChange(ev) {
     touched = true;
   }
 
-  if (touched) { dirty = true; scheduleRecompute(); }
+  if (touched) {
+    dirty = true;
+    // 手工编辑后，模板解析结果与当前数据不再一致，清除模板上下文
+    if (state.templateContext) {
+      state.templateContext = null;
+      updateTplBadge();
+    }
+    scheduleRecompute();
+  }
 }
 
 $("#btnAddResource").onclick = () => {
@@ -726,6 +757,7 @@ window.addEventListener("mousemove", (ev) => {
 
 window.addEventListener("mouseup", () => {
   if (drag && drag.moved) {
+    clearTemplateContext();
     recompute(false);
     if (drag.mode === "move") toast(`「${nodeName(drag.id)}」已锁定到新时间，双击甘特条可解锁`);
   }
@@ -740,6 +772,7 @@ canvas.addEventListener("dblclick", (ev) => {
   if (n.fixed_start) {
     n.fixed_start = null;
     syncFixedInput(n);
+    clearTemplateContext();
     recompute(false);
     toast(`「${n.name}」已解除固定时间`);
   }
@@ -787,6 +820,7 @@ function serializeState() {
     windowStart: state.windowStart, windowEnd: state.windowEnd,
     resources: state.resources, nodes: state.nodes, edges: state.edges,
     blackouts: state.blackouts, uid: state.uid,
+    templateContext: state.templateContext || null,
   };
 }
 function deserializeState(d) {
@@ -799,9 +833,36 @@ function deserializeState(d) {
   state.edges = d.edges || [];
   state.blackouts = d.blackouts || [];
   state.uid = d.uid || (state.nodes.length + state.blackouts.length + 1);
+  state.templateContext = d.templateContext || null;
   $("#winStart").value = state.windowStart;
   $("#winEnd").value = state.windowEnd;
   renderAll();
+  updateTplBadge();
+}
+
+/**
+ * 把排程器/模板实例化使用的「具体场景」结构载入编辑器。
+ * 与 buildPayload() 对应；可选 templateContext 标记数据来源。
+ */
+function loadConcreteScenario(scenario, templateContext = null) {
+  state.windowStart = scenario.window_start || "";
+  state.windowEnd = scenario.window_end || "";
+  state.resources = Object.entries(scenario.resources || {}).map(([name, capacity]) =>
+    ({ name, capacity }));
+  state.nodes = (scenario.nodes || []).map((n) => ({
+    id: n.id, name: n.name, duration_minutes: n.duration_minutes,
+    resources: { ...(n.resources || {}) }, fixed_start: n.fixed_start || null,
+  }));
+  const idSet = new Set(state.nodes.map((n) => n.id));
+  state.edges = (scenario.edges || []).filter((e) => idSet.has(e.source) && idSet.has(e.target));
+  state.blackouts = (scenario.blackouts || []).map((b, i) => ({
+    id: uid("b"), name: b.name || `禁排期${i + 1}`, start: b.start, end: b.end,
+  }));
+  state.templateContext = templateContext;
+  $("#winStart").value = state.windowStart;
+  $("#winEnd").value = state.windowEnd;
+  renderAll();
+  updateTplBadge();
 }
 
 $("#btnSave").onclick = async () => {
@@ -851,27 +912,40 @@ $("#btnDelete").onclick = async () => {
 // ---------------------------------------------------------------------------
 $("#btnExport").onclick = async () => {
   if (!state.windowStart || !state.windowEnd) return toast("请先设置维护窗口", true);
+  // 模板实例且未被手工改动：封包导出（含模板定义与解析后参数）；否则按普通场景导出
+  const ctx = state.templateContext;
+  const body = ctx
+    ? {
+        scenario: buildPayload(),
+        resolved: ctx.resolved || {},
+        template: ctx.template || {},
+        instance_name: ctx.instance_name || "",
+      }
+    : buildPayload();
   const resp = await fetch("/api/export", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(buildPayload()),
+    body: JSON.stringify(body),
   });
   if (!resp.ok) {
     const e = await resp.json().catch(() => ({}));
-    return toast("导出失败：" + (e.detail || resp.status), true);
+    return toast("导出失败：" + (e.detail?.message || e.detail || resp.status), true);
   }
   const blob = await resp.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = "maintenance-schedule.json";
+  a.href = url;
+  a.download = ctx ? "maintenance-template-instance.json" : "maintenance-schedule.json";
   a.click();
   URL.revokeObjectURL(url);
-  toast("已导出排程 JSON");
+  toast(ctx ? "已导出模板实例 JSON（含模板、解析参数与排程结果）" : "已导出排程 JSON");
 };
 
 // ---------------------------------------------------------------------------
 // 示例数据
 // ---------------------------------------------------------------------------
 $("#btnSample").onclick = () => {
+  state.templateContext = null;
+  updateTplBadge();
   const day = new Date();
   day.setHours(0, 0, 0, 0);
   const at = (dayOffset, h, m = 0) => dtLocal(new Date(day.getTime() + dayOffset * 86400000 + h * 3600000 + m * 60000));
@@ -930,8 +1004,27 @@ $("#btnSample").onclick = () => {
   $("#winStart").value = state.windowStart;
   $("#winEnd").value = state.windowEnd;
   renderAll();
+  updateTplBadge();
   loadScenarioList();
   recompute(false);
   // 首次交互后提示拖拽
   setTimeout(() => { if (lastResult && lastResult.feasible) toast("可直接拖动甘特条调整时间，松开即自动重算"); }, 800);
 })();
+
+// ---------------------------------------------------------------------------
+// 暴露给 templates.js 的接口
+// ---------------------------------------------------------------------------
+window.SchedulerApp = {
+  state,
+  buildPayload,
+  loadConcreteScene: loadConcreteScenario,
+  deserializeState,
+  serializeState,
+  renderAll,
+  recompute,
+  toast,
+  esc,
+  dtLocal,
+  refreshScenarioList: loadScenarioList,
+  getLastResult: () => lastResult,
+};
